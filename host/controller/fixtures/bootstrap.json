@@ -1,0 +1,5 @@
+{
+  "description": "Synthetic compatibility vector for material consisting of 32 bytes of value 7",
+  "certificateDerSha256": "1dd27e009080eae0a9b6313fba53fdf6625f9d1ea9e422445a01fee725a8c744",
+  "luksKey": "9d49a2ab0972a61be9daebb1802381e45d037c16d07b15cbf71e6e56850e321a9d8676d5c364c8c94f6cb53821e7790c8b2c5c1f4abe37b3f70f9b0e54b72553"
+}

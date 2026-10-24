@@ -1,0 +1,22 @@
+name: Validate host controller
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    env:
+      NODANA_PUBLIC_DOMAIN: staging.nodana.app
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config
+      - run: cargo fmt --manifest-path host/controller/Cargo.toml --check
+      - run: cargo check --manifest-path host/controller/Cargo.toml --locked
+      - run: cargo test --manifest-path host/controller/Cargo.toml --locked
+      - run: git diff --check
