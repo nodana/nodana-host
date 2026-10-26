@@ -1,0 +1,142 @@
+name: Publish reviewed host approval policy
+
+on:
+  workflow_dispatch:
+    inputs:
+      host_source_commit:
+        description: Exact host repository commit containing reviewed policy/host-images.json
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    outputs:
+      policy_sha256: ${{ steps.policy.outputs.sha256 }}
+    steps:
+      - name: Require exact Host repository commit
+        env:
+          HOST_COMMIT: ${{ inputs.host_source_commit }}
+        run: |
+          [[ "$HOST_COMMIT" =~ ^[a-f0-9]{40}$ ]]
+      - uses: actions/checkout@v6
+        with:
+          repository: nodana/nodana-host
+          ref: ${{ inputs.host_source_commit }}
+          persist-credentials: false
+      - name: Calculate policy checksum and show approval details
+        id: policy
+        env:
+          HOST_COMMIT: ${{ inputs.host_source_commit }}
+        run: |
+          policy_sha=$(sha256sum policy/host-images.json | cut -d ' ' -f 1)
+          echo "sha256=$policy_sha" >> "$GITHUB_OUTPUT"
+          jq --exit-status 'type == "object" and .version == 1 and (.serial | type == "number") and (.images | type == "array")' policy/host-images.json
+          {
+            echo '## Host policy awaiting approval'
+            echo
+            printf 'Host repository commit: `%s`\n\n' "$HOST_COMMIT"
+            printf 'Policy SHA-256: `%s`\n\n' "$policy_sha"
+            printf 'Approval serial: `%s`\n\n' "$(jq -r '.serial' policy/host-images.json)"
+            printf 'Approved images: %s\n\n' "$(jq '.images | length' policy/host-images.json)"
+            printf '[Review the exact policy file](https://github.com/nodana/nodana-host/blob/%s/policy/host-images.json)\n\n' "$HOST_COMMIT"
+            echo 'Review this policy before approving the host-policy-approval job.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  publish:
+    needs: prepare
+    concurrency:
+      group: host-approval-policy
+      cancel-in-progress: false
+    environment: host-policy-approval
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      deployments: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TOOL_COMMIT: ${{ vars.HOST_POLICY_TOOL_COMMIT }}
+      POLICY_TAG: host-policy-v1
+      POLICY_URL: https://github.com/nodana/nodana-host/releases/download/host-policy-v1/nodana-host-policy.json
+    steps:
+      - name: Require configured reviewers
+        run: |
+          reviewers=$(gh api "repos/$GH_REPO/environments/host-policy-approval" --jq '[.protection_rules[] | select(.type == "required_reviewers")] | length')
+          [[ "$reviewers" -gt 0 ]] || { echo 'Configure required reviewers for host-policy-approval first'; exit 1; }
+      - name: Require pinned signing tool
+        run: |
+          [[ "$TOOL_COMMIT" =~ ^[a-f0-9]{40}$ ]] || { echo 'Set HOST_POLICY_TOOL_COMMIT to the reviewed CLI tool commit'; exit 1; }
+      - uses: actions/checkout@v6
+        with:
+          repository: nodana/nodana-cli
+          ref: ${{ vars.HOST_POLICY_TOOL_COMMIT }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build reviewed policy tool
+        run: |
+          cargo test --locked --lib --bin nd-host-policy
+          cargo build --locked --release --bin nd-host-policy
+          mkdir signed-policy
+      - name: Download reviewed approval input
+        uses: actions/checkout@v6
+        with:
+          repository: nodana/nodana-host
+          ref: ${{ inputs.host_source_commit }}
+          path: .policy-source
+          persist-credentials: false
+      - name: Verify reviewed approval hash
+        env:
+          POLICY_SHA256: ${{ needs.prepare.outputs.policy_sha256 }}
+        run: |
+          printf '%s  .policy-source/policy/host-images.json\n' "$POLICY_SHA256" | sha256sum --check
+      - name: Sign reviewed policy
+        env:
+          SIGNING_KEY: ${{ secrets.HOST_POLICY_SIGNING_PRIVATE_KEY_PEM }}
+        run: |
+          target/release/nd-host-policy --input .policy-source/policy/host-images.json \
+            --private-key-env SIGNING_KEY --output signed-policy/nodana-host-policy.json
+      - name: Export independently pinnable host release manifests
+        run: |
+          target/release/nd-host-policy --input .policy-source/policy/host-images.json \
+            --export-host-releases host-releases
+          {
+            echo '## Host release checksums'
+            shopt -s nullglob
+            for checksum in host-releases/*-sha256.txt; do
+              printf '\n%s: `%s`\n' "$(basename "$checksum")" "$(cat "$checksum")"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Publish signed host policy and manifests
+        run: |
+          shopt -s nullglob
+          assets=(signed-policy/nodana-host-policy.json host-releases/*)
+          if gh release view "$POLICY_TAG" --repo "$GH_REPO" >/dev/null 2>&1; then
+            gh release upload "$POLICY_TAG" "${assets[@]}" --repo "$GH_REPO" --clobber
+          else
+            gh release create "$POLICY_TAG" "${assets[@]}" --repo "$GH_REPO" \
+              --target "$GITHUB_SHA" --latest=false --title 'Signed host approval policy' \
+              --notes 'Signed host approvals. Changes require independent verification and approval.'
+          fi
+      - name: Verify exact public download after publication
+        run: |
+          for attempt in 1 2 3 4 5 6; do
+            if curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
+              --max-time 30 --max-filesize 98304 -H 'Cache-Control: no-cache' \
+              "$POLICY_URL" --output public-policy.json && \
+              cmp -s signed-policy/nodana-host-policy.json public-policy.json; then break; fi
+            sleep 5
+          done
+          cmp signed-policy/nodana-host-policy.json public-policy.json
+          target/release/nd-host-policy --check public-policy.json
+      - uses: actions/upload-artifact@v7
+        with:
+          name: signed-host-policy
+          path: |
+            signed-policy/nodana-host-policy.json
+            host-releases/
+          if-no-files-found: error

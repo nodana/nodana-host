@@ -17,3 +17,9 @@ generation is in [`host.rs`](host/controller/src/host.rs) and
 installation are in [`bundle.rs`](host/controller/src/bundle.rs).
 
 For build inputs and local verification, see [development](docs/development.md).
+
+To independently pin a host release with `nd attest --approve-host-sha256`,
+review its manifest and checksum in this repository's
+[host approval release](https://github.com/nodana/nodana-host/releases/tag/host-policy-v1).
+Phoenixd bundle checksums are published separately in the Phoenixd repository.
+See [host policy publication](docs/host-policy-releases.md) for the release workflow.

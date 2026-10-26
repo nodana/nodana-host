@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "serial": 2026102601,
+  "images": [
+    {
+      "imageId": "ami-03f3b551d17c25f49",
+      "pcr4": "ddc87faedb70a3c7c52cbae53785f65e02f954e4098c57fcbb7eeaf22eada63de97f9895016e2070f2c9972ab9cc3250",
+      "pcr7": "241634be7c2cef3ae9081c06c845f266dd599aa64fbfa5d7aca50b3afaa19208ff145ffed91ff1b9a47c21cd924a1339",
+      "pcr12": "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "release": {
+        "releaseId": "protected-host-production-v0.1.0",
+        "repository": "https://github.com/nodana/nodana-aws",
+        "sourceCommit": "8407210dba42f41a96643760d7620b8353739a31",
+        "publicHostSource": {
+          "repository": "https://github.com/nodana/nodana-host",
+          "sourceCommit": "744032685fe841b4dbce14df66ca84108578b839",
+          "dirty": false
+        },
+        "artifacts": {
+          "diskSha256": "e46ad6ab0bcfba536a41684f39ce3cc420c82e6527aa6759590476b7ae0c6ab8",
+          "ukiSha256": "87f2ffbed108e31b0cc582efa2a86479e948e7993e92f3e76374dfa85d552151",
+          "sourceProvenanceSha256": "48e347b94edb10e33bcff65dd2cfd512486eeae583f860c8e4e9dc672c902358"
+        }
+      }
+    }
+  ]
+}
