@@ -1,25 +1,25 @@
 {
   "version": 1,
-  "serial": 2026102601,
+  "serial": 2026102901,
   "images": [
     {
-      "imageId": "ami-03f3b551d17c25f49",
-      "pcr4": "ddc87faedb70a3c7c52cbae53785f65e02f954e4098c57fcbb7eeaf22eada63de97f9895016e2070f2c9972ab9cc3250",
-      "pcr7": "241634be7c2cef3ae9081c06c845f266dd599aa64fbfa5d7aca50b3afaa19208ff145ffed91ff1b9a47c21cd924a1339",
+      "imageId": "ami-0839e1756ab8f3f6a",
+      "pcr4": "cc89c231bc5b79f26904029bff64437f4588e1a5791f7984d15c6a7fbcdb1c6ff382c12f0ef921cd98fdaaf2a1f7d412",
+      "pcr7": "d5edc3d01b2a48ae948880fe54bcef0a0c1ffa905736359bdbf18e2e9d27dbe3a859cbb67f161c58a7ddee4ba053aefd",
       "pcr12": "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
       "release": {
-        "releaseId": "protected-host-production-v0.1.0",
+        "releaseId": "protected-host-production-v0.1.1",
         "repository": "https://github.com/nodana/nodana-aws",
-        "sourceCommit": "8407210dba42f41a96643760d7620b8353739a31",
+        "sourceCommit": "3038351791fe0186f406562b90677c2a91f91fa7",
         "publicHostSource": {
           "repository": "https://github.com/nodana/nodana-host",
-          "sourceCommit": "744032685fe841b4dbce14df66ca84108578b839",
+          "sourceCommit": "4fdb43b1c14bb99e62daa5f72f0f5465c5ef40f2",
           "dirty": false
         },
         "artifacts": {
-          "diskSha256": "e46ad6ab0bcfba536a41684f39ce3cc420c82e6527aa6759590476b7ae0c6ab8",
-          "ukiSha256": "87f2ffbed108e31b0cc582efa2a86479e948e7993e92f3e76374dfa85d552151",
-          "sourceProvenanceSha256": "48e347b94edb10e33bcff65dd2cfd512486eeae583f860c8e4e9dc672c902358"
+          "diskSha256": "47f709a44f1e452fc3fc2670296c4eee2b230ee1c5d84dd4369ab071f3f3c506",
+          "ukiSha256": "9d910af936cda02c5a7874c084a2bcb6c57c3d576fc49c24704a4fbc9e46d346",
+          "sourceProvenanceSha256": "5d3a70c43ed428f7a5ff17d4b9d67602f91f224b09b53ca5c80f18cae93a2b23"
         }
       }
     }
