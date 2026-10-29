@@ -17,6 +17,72 @@ use std::{
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CreateInvoice {
+    pub amount_sat: u64,
+    pub description: String,
+    pub expiry_seconds: Option<u32>,
+    pub external_id: Option<String>,
+}
+
+impl CreateInvoice {
+    pub fn validate(&self) -> Result<()> {
+        ensure!(
+            self.amount_sat > 0 && self.amount_sat <= 9_007_199_254_740_991,
+            "invalid amount"
+        );
+        ensure!(
+            !self.description.trim().is_empty() && self.description.chars().count() <= 128,
+            "invalid description"
+        );
+        ensure!(self.expiry_seconds != Some(0), "invalid expiry");
+        ensure!(
+            self.external_id
+                .as_ref()
+                .is_none_or(|v| !v.trim().is_empty() && v.chars().count() <= 128),
+            "invalid external id"
+        );
+        Ok(())
+    }
+}
+
+#[derive(serde::Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreatedInvoice {
+    pub amount_sat: u64,
+    pub payment_hash: String,
+    pub serialized: String,
+}
+
+impl CreatedInvoice {
+    pub fn validate(&self, request: &CreateInvoice) -> Result<()> {
+        ensure!(
+            self.amount_sat == request.amount_sat,
+            "invalid invoice amount"
+        );
+        ensure!(
+            self.payment_hash.len() == 64
+                && self
+                    .payment_hash
+                    .bytes()
+                    .all(|v| v.is_ascii_digit() || (b'a'..=b'f').contains(&v)),
+            "invalid payment hash"
+        );
+        ensure!(
+            (self.serialized.starts_with("lnbc") || self.serialized.starts_with("lntb"))
+                && self.serialized.len() > 6
+                && self.serialized.len() <= 16384
+                && self
+                    .serialized
+                    .bytes()
+                    .all(|v| v.is_ascii_lowercase() || v.is_ascii_digit()),
+            "invalid invoice"
+        );
+        Ok(())
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CreateOffer {
     pub description: Option<String>,
     pub amount_sat: Option<u64>,
@@ -516,6 +582,37 @@ impl Runtime {
         ensure!(status == 200, "node read failed");
         Ok(serde_json::from_slice(&body)?)
     }
+    pub fn create_invoice(&self, node: &str, request: &CreateInvoice) -> Result<Value> {
+        request.validate()?;
+        let password = self.passwords(node)?.1;
+        let authorization = reqwest::header::HeaderValue::from_str(&format!(
+            "Basic {}",
+            encode(format!(":{password}"))
+        ))?;
+        let mut form = url::form_urlencoded::Serializer::new(String::new());
+        form.append_pair("amountSat", &request.amount_sat.to_string());
+        form.append_pair("description", &request.description);
+        if let Some(expiry) = request.expiry_seconds {
+            form.append_pair("expirySeconds", &expiry.to_string());
+        }
+        if let Some(reference) = &request.external_id {
+            form.append_pair("externalId", reference);
+        }
+        let (status, _, body) = self.proxy(
+            node,
+            "POST",
+            "/createinvoice",
+            Some(&authorization),
+            Some(form.finish().into_bytes()),
+            "application/x-www-form-urlencoded",
+            32768,
+        )?;
+        ensure!(status == 200, "node invoice creation failed");
+        let invoice: CreatedInvoice = serde_json::from_slice(&body)?;
+        invoice.validate(request)?;
+        Ok(serde_json::to_value(invoice)?)
+    }
+
     pub fn create_offer(&self, node: &str, request: &CreateOffer) -> Result<Value> {
         request.validate()?;
         let password = self.passwords(node)?.0;

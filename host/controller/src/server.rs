@@ -442,6 +442,15 @@ fn control(
             return Err(fail(409, "node_not_ready"));
         }
         match (method, action) {
+            ("POST", "invoices") => {
+                let request: crate::runtime::CreateInvoice =
+                    serde_json::from_value(json_body(parts, bytes)?)
+                        .map_err(|_| fail(400, "invalid_request"))?;
+                request
+                    .validate()
+                    .map_err(|_| fail(400, "invalid_request"))?;
+                return response(200, host.runtime.create_invoice(&job.node_id, &request)?);
+            }
             ("GET", "listchannels") => return response(200, host.list_channels(deployment)?),
             ("POST", "closechannel") => {
                 let request: crate::runtime::CloseChannel =

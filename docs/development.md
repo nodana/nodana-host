@@ -14,6 +14,38 @@ Validation uses the staging domain for synthetic test identities and disposable
 local TLS servers. The public fixture contains AWS-signed evidence, with tests
 evaluating it at its recorded capture time. These tests do not contact AWS.
 
+## Create an invoice through the control API
+
+An API-role mTLS client can call
+`POST /v1/deployments/{deploymentId}/invoices` for a ready deployment with JSON:
+
+```json
+{
+  "amountSat": 1000,
+  "description": "Order 1042",
+  "expirySeconds": 600,
+  "externalId": "order-1042"
+}
+```
+
+`amountSat` and `description` are required. The amount must be a positive integer
+no greater than 9,007,199,254,740,991. Descriptions and optional external IDs must
+contain non-whitespace text and be at most 128 characters. Optional
+`expirySeconds` must be a positive 32-bit unsigned integer; omission uses
+Phoenixd's default. Unknown fields are rejected, including webhook overrides.
+
+The response contains `amountSat`, `paymentHash` and `serialized` (the BOLT11
+invoice). The controller uses the node's restricted credential internally and
+retains its configured webhook destination. Invalid inputs return 400, a
+deployment that is not ready returns 409, and upstream failures or malformed
+responses return 503. Existing control identity checks apply.
+
+Creation is not idempotent: `externalId` is a correlation reference, not a
+deduplication key. A timeout can occur after Phoenixd creates the invoice;
+reconcile incoming payment records before deciding whether to create another.
+
+## Build the controller
+
 To build a controller, explicitly supply its deployment domain:
 
 ```sh

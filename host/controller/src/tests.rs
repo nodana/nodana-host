@@ -268,6 +268,8 @@ fn certificate_attempts_are_manual_persistent_and_environment_scoped() {
 
 struct Backend {
     address: std::net::SocketAddr,
+    invoices: Arc<std::sync::Mutex<Vec<String>>>,
+    invoice_response: Arc<std::sync::Mutex<(u16, Value)>>,
     offers: Arc<std::sync::Mutex<Vec<String>>>,
     closes: Arc<std::sync::Mutex<Vec<String>>>,
     channels: Arc<std::sync::Mutex<Value>>,
@@ -282,6 +284,13 @@ impl Backend {
         listener.set_nonblocking(true).unwrap();
         let stopping = Arc::new(AtomicBool::new(false));
         let flag = stopping.clone();
+        let invoices = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let recorded_invoices = invoices.clone();
+        let invoice_response = Arc::new(std::sync::Mutex::new((
+            200,
+            json!({"amountSat":123,"paymentHash":"ab".repeat(32),"serialized":"lnbc123fixture","password":"never expose"}),
+        )));
+        let invoice_reply = invoice_response.clone();
         let offers = Arc::new(std::sync::Mutex::new(Vec::new()));
         let recorded_offers = offers.clone();
         let closes = Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -380,6 +389,25 @@ impl Backend {
                             write!(stream,"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",body.len(),body).unwrap();
                             continue;
                         }
+                        if request.starts_with("POST /createinvoice ") {
+                            assert_eq!(
+                                authorization,
+                                Some(format!("Basic {}", encode(":restricted")).as_str())
+                            );
+                            assert!(
+                                request
+                                    .to_ascii_lowercase()
+                                    .contains("content-type: application/x-www-form-urlencoded")
+                            );
+                            recorded_invoices
+                                .lock()
+                                .unwrap()
+                                .push(request.split_once("\r\n\r\n").unwrap().1.to_string());
+                            let (status, body) = invoice_reply.lock().unwrap().clone();
+                            let body = body.to_string();
+                            write!(stream, "HTTP/1.1 {status} Response\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body).unwrap();
+                            continue;
+                        }
                         if request.starts_with("POST /createoffer ") {
                             assert_eq!(
                                 authorization,
@@ -416,6 +444,8 @@ impl Backend {
         });
         Self {
             address,
+            invoices,
+            invoice_response,
             offers,
             closes,
             channels,
@@ -702,6 +732,126 @@ async fn real_tls_routes_authenticates_attests_and_fetches_private_recent_logs()
         );
     }
     assert_eq!(backend.offers.lock().unwrap().len(), 3);
+    let invoices_url = format!("{control_origin}/invoices");
+    let invoice_input = json!({"amountSat":123,"description":"Coffee & tips ☕","expirySeconds":600,"externalId":"order & 42"});
+    for input in [
+        invoice_input.clone(),
+        json!({"amountSat":123,"description":"Coffee"}),
+    ] {
+        let invoice: Value = control_client
+            .post(&invoices_url)
+            .json(&input)
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(
+            invoice,
+            json!({"amountSat":123,"paymentHash":"ab".repeat(32),"serialized":"lnbc123fixture"})
+        );
+    }
+    let forms: Vec<std::collections::HashMap<String, String>> = backend
+        .invoices
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|body| {
+            url::form_urlencoded::parse(body.as_bytes())
+                .into_owned()
+                .collect()
+        })
+        .collect();
+    assert_eq!(forms[0]["amountSat"], "123");
+    assert_eq!(forms[0]["description"], "Coffee & tips ☕");
+    assert_eq!(forms[0]["expirySeconds"], "600");
+    assert_eq!(forms[0]["externalId"], "order & 42");
+    assert!(!forms[1].contains_key("expirySeconds"));
+    assert!(!forms[1].contains_key("externalId"));
+    for (key, value) in [
+        ("amountSat", json!(0)),
+        ("amountSat", json!(-1)),
+        ("amountSat", json!(1.5)),
+        ("amountSat", json!(9_007_199_254_740_992u64)),
+        ("description", json!(" ")),
+        ("description", json!("x".repeat(129))),
+        ("expirySeconds", json!(0)),
+        ("expirySeconds", json!(-1)),
+        ("expirySeconds", json!(4294967296u64)),
+        ("externalId", json!(" ")),
+        ("externalId", json!("x".repeat(129))),
+        ("webhookUrl", json!("https://example.test")),
+        ("password", json!("forbidden")),
+    ] {
+        let mut invalid = invoice_input.clone();
+        invalid[key] = value;
+        assert_eq!(
+            control_client
+                .post(&invoices_url)
+                .json(&invalid)
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            400
+        );
+    }
+    for key in ["amountSat", "description"] {
+        let mut invalid = invoice_input.clone();
+        invalid.as_object_mut().unwrap().remove(key);
+        assert_eq!(
+            control_client
+                .post(&invoices_url)
+                .json(&invalid)
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            400
+        );
+    }
+    assert_eq!(
+        control_client
+            .get(&invoices_url)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        404
+    );
+    assert_eq!(backend.invoices.lock().unwrap().len(), 2);
+    for (status, body) in [
+        (500, json!({"password":"never expose"})),
+        (
+            200,
+            json!({"amountSat":124,"paymentHash":"ab".repeat(32),"serialized":"lnbc123fixture"}),
+        ),
+        (
+            200,
+            json!({"amountSat":123,"paymentHash":"invalid","serialized":"lnbc123fixture"}),
+        ),
+        (
+            200,
+            json!({"amountSat":123,"paymentHash":"ab".repeat(32),"serialized":"invalid"}),
+        ),
+        (200, json!({})),
+    ] {
+        *backend.invoice_response.lock().unwrap() = (status, body);
+        let response = control_client
+            .post(&invoices_url)
+            .json(&invoice_input)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 503);
+        assert_eq!(
+            response.json::<Value>().await.unwrap(),
+            json!({"code":"host_unavailable"})
+        );
+    }
     let channels_url = format!("{control_origin}/listchannels");
     let close_url = format!("{control_origin}/closechannel");
     let channels: Value = control_client
@@ -839,6 +989,27 @@ async fn real_tls_routes_authenticates_attests_and_fetches_private_recent_logs()
     let admin = client_for("admin");
     let next = client_for("client-next");
     let unauthorized = client_for("unauthorized");
+    assert!(
+        anonymous
+            .post(&invoices_url)
+            .json(&invoice_input)
+            .send()
+            .await
+            .is_err()
+    );
+    for (client, status) in [(&unauthorized, 401), (&admin, 403)] {
+        assert_eq!(
+            client
+                .post(&invoices_url)
+                .json(&invoice_input)
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            status
+        );
+    }
+    assert_eq!(backend.invoices.lock().unwrap().len(), 7);
     assert!(anonymous.get(&channels_url).send().await.is_err());
     assert!(
         anonymous
@@ -1111,6 +1282,17 @@ async fn real_tls_routes_authenticates_attests_and_fetches_private_recent_logs()
         .await
         .unwrap();
     assert_eq!(stop["status"], "stopped");
+    assert_eq!(
+        control_client
+            .post(&invoices_url)
+            .json(&invoice_input)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        409
+    );
+    assert_eq!(backend.invoices.lock().unwrap().len(), 7);
     assert_eq!(
         control_client
             .get(&channels_url)
